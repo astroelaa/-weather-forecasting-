@@ -64,7 +64,14 @@ Note: Quantum model was trained on only 500 samples due to simulator performance
 - scikit-learn
 - NumPy, pandas, matplotlib
 
----
+---weather-forecasting-qml/
+├── notebooks/
+│ └── forecasting_code.ipynb # Full Colab notebook (cleaned and commented)
+├── report/
+│ └── weather_report_team13.pdf # Final project report
+├── data/
+│ └── weather_data.csv # Cleaned input dataset (optional)
+└── README.md  where to out this?
 
 ## How to Run
 
