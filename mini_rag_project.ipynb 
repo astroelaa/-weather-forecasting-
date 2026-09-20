@@ -1,0 +1,454 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "private_outputs": true,
+      "provenance": [],
+      "authorship_tag": "ABX9TyPAM+VSYoMem9E3HIxNe/9R",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/astroelaa/-weather-forecasting-/blob/main/mini_rag_project.ipynb%20\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "**Import**"
+      ],
+      "metadata": {
+        "id": "OTSO1JtQtbYy"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "OxGCxqXOsuBA"
+      },
+      "outputs": [],
+      "source": [
+        "!pip install -q langchain-text-splitters sentence-transformers transformers chromadb pypdf python-docx"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "import glob\n",
+        "import shutil\n",
+        "import chromadb\n",
+        "DATA_DIR = \"data\"\n",
+        "os.makedirs(DATA_DIR, exist_ok=True)"
+      ],
+      "metadata": {
+        "id": "3LrW7U5es03l"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from google.colab import files\n",
+        "\n",
+        "uploaded = files.upload()"
+      ],
+      "metadata": {
+        "id": "ukSupUkvtj6Y"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "for filename in uploaded.keys():\n",
+        "    shutil.move(filename, os.path.join(DATA_DIR, filename))\n",
+        "\n",
+        "os.listdir(DATA_DIR)"
+      ],
+      "metadata": {
+        "id": "EzoY5SwLt73z"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Reader for the pdf"
+      ],
+      "metadata": {
+        "id": "AH9U5KEiuVdX"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from pypdf import PdfReader\n",
+        "\n",
+        "reader = PdfReader(\"data/Savov_Notes.pdf\")\n",
+        "\n",
+        "text = \"\"\n",
+        "for page in reader.pages:\n",
+        "    text += page.extract_text() or \"\"\n",
+        "\n",
+        "print(len(text))\n",
+        "print(text[:300])"
+      ],
+      "metadata": {
+        "id": "Q1hOWiumuCcE"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "chuncking"
+      ],
+      "metadata": {
+        "id": "U5g6B404vhwX"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from langchain_text_splitters import RecursiveCharacterTextSplitter\n",
+        "\n",
+        "splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)\n",
+        "chunks = splitter.split_text(text)\n",
+        "\n",
+        "len(chunks)"
+      ],
+      "metadata": {
+        "id": "W_AZDhBFvSkL"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "embed the chuncks"
+      ],
+      "metadata": {
+        "id": "MoivvXOnv-PF"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from sentence_transformers import SentenceTransformer\n",
+        "\n",
+        "model = SentenceTransformer(\"all-MiniLM-L6-v2\")\n",
+        "chunk_embeddings = model.encode(chunks, show_progress_bar=True)\n",
+        "\n",
+        "chunk_embeddings.shape"
+      ],
+      "metadata": {
+        "id": "ky9wIVlZv9pW"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "store in Chroma"
+      ],
+      "metadata": {
+        "id": "vU8Tp6s3whqC"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "client = chromadb.EphemeralClient()\n",
+        "\n",
+        "try:\n",
+        "    client.delete_collection(\"notes\")\n",
+        "except Exception:\n",
+        "    pass\n",
+        "\n",
+        "collection = client.create_collection(\"notes\")\n",
+        "\n",
+        "collection.add(\n",
+        "    ids=[str(i) for i in range(len(chunks))],\n",
+        "    embeddings=chunk_embeddings.tolist(),\n",
+        "    documents=chunks,\n",
+        ")\n",
+        "\n",
+        "collection.count()"
+      ],
+      "metadata": {
+        "id": "jWMj5E4DwhST"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "retrieval"
+      ],
+      "metadata": {
+        "id": "ZagVxmxTxhvf"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def retrieve(query, k=3):\n",
+        "    query_vector = model.encode(query).tolist()\n",
+        "    results = collection.query(query_embeddings=[query_vector], n_results=k)\n",
+        "\n",
+        "    retrieved = []\n",
+        "    for text_chunk, distance in zip(results[\"documents\"][0], results[\"distances\"][0]):\n",
+        "        retrieved.append({\"text\": text_chunk, \"distance\": distance})\n",
+        "    return retrieved\n",
+        "\n",
+        "test = retrieve(\"ask something you know is in your notes\", k=3)\n",
+        "for r in test:\n",
+        "    print(round(r[\"distance\"], 3))\n",
+        "    print(r[\"text\"][:200])\n",
+        "    print()"
+      ],
+      "metadata": {
+        "id": "Dag32i-VxhUf"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "context & prompt"
+      ],
+      "metadata": {
+        "id": "fY85_vo41HgK"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "PROMPT_TEMPLATE = \"\"\"Use only the context below to answer. Do not use any outside knowledge.\n",
+        "If the context does not contain the answer, respond exactly: \"I don't have enough information in the provided documents.\"\n",
+        "\n",
+        "Context:\n",
+        "{context}\n",
+        "\n",
+        "Question:\n",
+        "{question}\n",
+        "\n",
+        "Answer:\"\"\"\n",
+        "\n",
+        "def build_prompt(question, context):\n",
+        "    return PROMPT_TEMPLATE.format(context=context, question=question)"
+      ],
+      "metadata": {
+        "id": "s_W9Pqqyvotf"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "generation model"
+      ],
+      "metadata": {
+        "id": "PV-yfEn81NUy"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import AutoTokenizer, AutoModelForSeq2SeqLM\n",
+        "\n",
+        "gen_tokenizer = AutoTokenizer.from_pretrained(\"google/flan-t5-base\")\n",
+        "gen_model = AutoModelForSeq2SeqLM.from_pretrained(\"google/flan-t5-base\")\n",
+        "\n",
+        "def generate_answer(question, context):\n",
+        "    prompt = build_prompt(question, context)\n",
+        "    inputs = gen_tokenizer(prompt, return_tensors=\"pt\", truncation=True, max_length=512)\n",
+        "    output = gen_model.generate(**inputs, max_new_tokens=200)\n",
+        "    return gen_tokenizer.decode(output[0], skip_special_tokens=True)"
+      ],
+      "metadata": {
+        "id": "KQ6j-7jD1OKl"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "pipline to question"
+      ],
+      "metadata": {
+        "id": "m-izZ--b3BaN"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def rag_pipeline(question, k=3):\n",
+        "    retrieved = retrieve(question, k=k)\n",
+        "    context = build_context(retrieved)\n",
+        "    answer = generate_answer(question, context)\n",
+        "    return answer"
+      ],
+      "metadata": {
+        "id": "vEOqHVXa3HGo"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "test no. 1"
+      ],
+      "metadata": {
+        "id": "47puBRh84LNV"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "questions = [\n",
+        "    \"what is a diagonalizable matrix\",\n",
+        "    \"what does it mean for a matrix to be invertible\",\n",
+        "    \"what is the rank of a matrix\",\n",
+        "]\n",
+        "\n",
+        "for q in questions:\n",
+        "    print(q)\n",
+        "    print(rag_pipeline(q))\n",
+        "    print()"
+      ],
+      "metadata": {
+        "id": "rRGcdvN_4Mva"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "off_topic_questions = [\n",
+        "    \"what's the weather in Cairo today\",\n",
+        "    \"who won the world cup in 2018\",\n",
+        "]\n",
+        "\n",
+        "for q in off_topic_questions:\n",
+        "    print(q)\n",
+        "    print(rag_pipeline(q))\n",
+        "    print()"
+      ],
+      "metadata": {
+        "id": "K-vQK5Os4fYN"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "fixing formates"
+      ],
+      "metadata": {
+        "id": "eHTPIreQ65JL"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import re\n",
+        "\n",
+        "from pypdf import PdfReader\n",
+        "\n",
+        "reader = PdfReader(\"data/Savov_Notes.pdf\")\n",
+        "\n",
+        "text = \"\"\n",
+        "for page in reader.pages:\n",
+        "    text += page.extract_text() or \"\"\n",
+        "\n",
+        "text = re.sub(r'[˛⃗]', '', text)\n",
+        "text = re.sub(r'\\s+', ' ', text)\n",
+        "\n",
+        "print(len(text))\n",
+        "print(text[:300])"
+      ],
+      "metadata": {
+        "id": "gG4Rzkv46-T3"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "test no.2"
+      ],
+      "metadata": {
+        "id": "AVyiAR2h7TQs"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "print()\n",
+        "\n",
+        "questions_2 = [\n",
+        "    \"what is a diagonalizable matrix\",\n",
+        "    \"what does it mean for a matrix to be invertible\",\n",
+        "    \"what is the rank of a matrix\",\n",
+        "    \"what is an eigenvector\",\n",
+        "]\n",
+        "\n",
+        "for q in questions_2:\n",
+        "    print(q)\n",
+        "    print(rag_pipeline(q))\n",
+        "    print()\n",
+        "\n",
+        "print(\"Test No. 2 — off-topic questions\")\n",
+        "print()\n",
+        "\n",
+        "off_topic_2 = [\n",
+        "    \"what's the weather in Cairo today\",\n",
+        "    \"who won the world cup in 2018\",\n",
+        "]\n",
+        "\n",
+        "for q in off_topic_2:\n",
+        "    print(q)\n",
+        "    print(rag_pipeline(q))\n",
+        "    print()"
+      ],
+      "metadata": {
+        "id": "_IcwadCD7Y7o"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
